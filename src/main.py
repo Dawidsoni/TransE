@@ -35,9 +35,9 @@ def main():
         summary_writer = tf.summary.FileWriter(logdir=args.summary_dir, graph=sess.graph)
         for epoch in range(args.max_epoch):
             print('=' * 30 + '[EPOCH {}]'.format(epoch) + '=' * 30)
-            kge_model.launch_training(session=sess, summary_writer=summary_writer)
-            if (epoch + 1) % args.eval_freq == 0:
-                kge_model.launch_evaluation(session=sess)
+            kge_model.launch_training(session=sess, summary_writer=summary_writer, step=epoch)
+            kge_model.launch_evaluation(session=sess)
+            kge_model.launch_test(session=sess, summary_writer=summary_writer, step=epoch)
 
 
 if __name__ == '__main__':

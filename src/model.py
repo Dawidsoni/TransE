@@ -107,13 +107,12 @@ class TransE:
                                                      k=self.kg.n_entity)
         return idx_head_prediction, idx_tail_prediction
 
-    def launch_training(self, session, summary_writer):
+    def launch_training(self, session, summary_writer, step):
         raw_batch_queue = mp.Queue()
         training_batch_queue = mp.Queue()
         for _ in range(self.n_generator):
             mp.Process(target=self.kg.generate_training_batch, kwargs={'in_queue': raw_batch_queue,
                                                                        'out_queue': training_batch_queue}).start()
-        print('-----Start training-----')
         start = timeit.default_timer()
         n_batch = 0
         for raw_batch in self.kg.next_raw_batch(self.batch_size):
@@ -121,7 +120,6 @@ class TransE:
             n_batch += 1
         for _ in range(self.n_generator):
             raw_batch_queue.put(None)
-        print('-----Constructing training batches-----')
         epoch_loss = 0
         n_used_triple = 0
         for i in range(n_batch):
@@ -133,15 +131,35 @@ class TransE:
             summary_writer.add_summary(summary, global_step=self.global_step.eval(session=session))
             epoch_loss += batch_loss
             n_used_triple += len(batch_pos)
-            print('[{:.3f}s] #triple: {}/{} triple_avg_loss: {:.6f}'.format(timeit.default_timer() - start,
-                                                                            n_used_triple,
-                                                                            self.kg.n_training_triple,
-                                                                            batch_loss / len(batch_pos)), end='\r')
+        avg_loss = epoch_loss / n_used_triple
+        print(f'Average training sample loss: {avg_loss: .3f}')
+
+    def launch_test(self, session, summary_writer, step):
+        raw_batch_queue = mp.Queue()
+        test_batch_queue = mp.Queue()
+        for _ in range(self.n_generator):
+            mp.Process(target=self.kg.generate_test_batch, kwargs={'in_queue': raw_batch_queue,
+                                                                   'out_queue': test_batch_queue}).start()
+        start = timeit.default_timer()
+        n_batch = 0
+        for raw_batch in self.kg.next_test_raw_batch(self.batch_size):
+            raw_batch_queue.put(raw_batch)
+            n_batch += 1
+        for _ in range(self.n_generator):
+            raw_batch_queue.put(None)
+        epoch_loss = 0
+        n_used_triple = 0
+        for i in range(n_batch):
+            batch_pos, batch_neg = test_batch_queue.get()
+            batch_loss = session.run(fetches=self.loss,
+                                     feed_dict={self.triple_pos: batch_pos,
+                                                self.triple_neg: batch_neg,
+                                                self.margin: [self.margin_value] * len(batch_pos)})
+            epoch_loss += batch_loss
+            n_used_triple += len(batch_pos)
+        avg_loss = epoch_loss / n_used_triple
+        print(f'Average test sample loss: {avg_loss: .3f}')
         print()
-        print('epoch loss: {:.3f}'.format(epoch_loss))
-        print('cost time: {:.3f}s'.format(timeit.default_timer() - start))
-        print('-----Finish training-----')
-        self.check_norm(session=session)
 
     def launch_evaluation(self, session):
         eval_result_queue = mp.JoinableQueue()
@@ -158,16 +176,9 @@ class TransE:
                                                                    feed_dict={self.eval_triple: eval_triple})
             eval_result_queue.put((eval_triple, idx_head_prediction, idx_tail_prediction))
             n_used_eval_triple += 1
-            print('[{:.3f}s] #evaluation triple: {}/{}'.format(timeit.default_timer() - start,
-                                                               n_used_eval_triple,
-                                                               self.kg.n_test_triple), end='\r')
-        print()
         for _ in range(self.n_rank_calculator):
             eval_result_queue.put(None)
-        print('-----Joining all rank calculator-----')
         eval_result_queue.join()
-        print('-----All rank calculation accomplished-----')
-        print('-----Obtaining evaluation results-----')
         '''Raw'''
         head_meanrank_raw = 0
         head_hits10_raw = 0
@@ -192,32 +203,22 @@ class TransE:
             tail_meanrank_filter += tail_rank_filter
             if tail_rank_filter < 10:
                 tail_hits10_filter += 1
-        print('-----Raw-----')
         head_meanrank_raw /= n_used_eval_triple
         head_hits10_raw /= n_used_eval_triple
         tail_meanrank_raw /= n_used_eval_triple
         tail_hits10_raw /= n_used_eval_triple
-        print('-----Head prediction-----')
-        print('MeanRank: {:.3f}, Hits@10: {:.3f}'.format(head_meanrank_raw, head_hits10_raw))
-        print('-----Tail prediction-----')
-        print('MeanRank: {:.3f}, Hits@10: {:.3f}'.format(tail_meanrank_raw, tail_hits10_raw))
-        print('------Average------')
-        print('MeanRank: {:.3f}, Hits@10: {:.3f}'.format((head_meanrank_raw + tail_meanrank_raw) / 2,
+        print('Head Raw MeanRank: {:.3f}, Hits@10: {:.3f}'.format(head_meanrank_raw, head_hits10_raw))
+        print('Tail Raw MeanRank: {:.3f}, Hits@10: {:.3f}'.format(tail_meanrank_raw, tail_hits10_raw))
+        print('Average Raw MeanRank: {:.3f}, Hits@10: {:.3f}'.format((head_meanrank_raw + tail_meanrank_raw) / 2,
                                                          (head_hits10_raw + tail_hits10_raw) / 2))
-        print('-----Filter-----')
         head_meanrank_filter /= n_used_eval_triple
         head_hits10_filter /= n_used_eval_triple
         tail_meanrank_filter /= n_used_eval_triple
         tail_hits10_filter /= n_used_eval_triple
-        print('-----Head prediction-----')
-        print('MeanRank: {:.3f}, Hits@10: {:.3f}'.format(head_meanrank_filter, head_hits10_filter))
-        print('-----Tail prediction-----')
-        print('MeanRank: {:.3f}, Hits@10: {:.3f}'.format(tail_meanrank_filter, tail_hits10_filter))
-        print('-----Average-----')
-        print('MeanRank: {:.3f}, Hits@10: {:.3f}'.format((head_meanrank_filter + tail_meanrank_filter) / 2,
+        print('Head Filter MeanRank: {:.3f}, Hits@10: {:.3f}'.format(head_meanrank_filter, head_hits10_filter))
+        print('Tail Filter MeanRank: {:.3f}, Hits@10: {:.3f}'.format(tail_meanrank_filter, tail_hits10_filter))
+        print('Average Filter MeanRank: {:.3f}, Hits@10: {:.3f}'.format((head_meanrank_filter + tail_meanrank_filter) / 2,
                                                          (head_hits10_filter + tail_hits10_filter) / 2))
-        print('cost time: {:.3f}s'.format(timeit.default_timer() - start))
-        print('-----Finish evaluation-----')
 
     def calculate_rank(self, in_queue, out_queue):
         while True:

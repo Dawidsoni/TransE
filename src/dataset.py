@@ -23,6 +23,7 @@ class KnowledgeGraph:
         self.load_triples()
         '''construct pools after loading'''
         self.training_triple_pool = set(self.training_triples)
+        self.test_triple_pool = set(self.test_triples)
         self.golden_triple_pool = set(self.training_triples) | set(self.validation_triples) | set(self.test_triples)
 
     def load_dicts(self):
@@ -47,22 +48,22 @@ class KnowledgeGraph:
         print('-----Loading training triples-----')
         training_df = pd.read_table(os.path.join(self.data_dir, training_file), header=None)
         self.training_triples = list(zip([self.entity_dict[h] for h in training_df[0]],
-                                         [self.entity_dict[t] for t in training_df[1]],
-                                         [self.relation_dict[r] for r in training_df[2]]))
+                                         [self.entity_dict[t] for t in training_df[2]],
+                                         [self.relation_dict[r] for r in training_df[1]]))
         self.n_training_triple = len(self.training_triples)
         print('#training triple: {}'.format(self.n_training_triple))
         print('-----Loading validation triples-----')
         validation_df = pd.read_table(os.path.join(self.data_dir, validation_file), header=None)
         self.validation_triples = list(zip([self.entity_dict[h] for h in validation_df[0]],
-                                           [self.entity_dict[t] for t in validation_df[1]],
-                                           [self.relation_dict[r] for r in validation_df[2]]))
+                                           [self.entity_dict[t] for t in validation_df[2]],
+                                           [self.relation_dict[r] for r in validation_df[1]]))
         self.n_validation_triple = len(self.validation_triples)
         print('#validation triple: {}'.format(self.n_validation_triple))
         print('-----Loading test triples------')
         test_df = pd.read_table(os.path.join(self.data_dir, test_file), header=None)
         self.test_triples = list(zip([self.entity_dict[h] for h in test_df[0]],
-                                     [self.entity_dict[t] for t in test_df[1]],
-                                     [self.relation_dict[r] for r in test_df[2]]))
+                                     [self.entity_dict[t] for t in test_df[2]],
+                                     [self.relation_dict[r] for r in test_df[1]]))
         self.n_test_triple = len(self.test_triples)
         print('#test triple: {}'.format(self.n_test_triple))
 
@@ -72,6 +73,14 @@ class KnowledgeGraph:
         while start < self.n_training_triple:
             end = min(start + batch_size, self.n_training_triple)
             yield [self.training_triples[i] for i in rand_idx[start:end]]
+            start = end
+
+    def next_test_raw_batch(self, batch_size):
+        rand_idx = np.random.permutation(self.n_test_triple)
+        start = 0
+        while start < self.n_test_triple:
+            end = min(start + batch_size, self.n_test_triple)
+            yield [self.test_triples[i] for i in rand_idx[start:end]]
             start = end
 
     def generate_training_batch(self, in_queue, out_queue):
@@ -95,3 +104,26 @@ class KnowledgeGraph:
                             break
                     batch_neg.append((head_neg, tail_neg, relation))
                 out_queue.put((batch_pos, batch_neg))
+
+    def generate_test_batch(self, in_queue, out_queue):
+        while True:
+            raw_batch = in_queue.get()
+            if raw_batch is None:
+                return
+            else:
+                batch_pos = raw_batch
+                batch_neg = []
+                corrupt_head_prob = np.random.binomial(1, 0.5)
+                for head, tail, relation in batch_pos:
+                    head_neg = head
+                    tail_neg = tail
+                    while True:
+                        if corrupt_head_prob:
+                            head_neg = random.choice(self.entities)
+                        else:
+                            tail_neg = random.choice(self.entities)
+                        if (head_neg, tail_neg, relation) not in self.test_triple_pool:
+                            break
+                    batch_neg.append((head_neg, tail_neg, relation))
+                out_queue.put((batch_pos, batch_neg))
+

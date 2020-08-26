@@ -164,7 +164,6 @@ class TransE:
     def launch_evaluation(self, session):
         eval_result_queue = mp.JoinableQueue()
         rank_result_queue = mp.Queue()
-        print('-----Start evaluation-----')
         start = timeit.default_timer()
         for _ in range(self.n_rank_calculator):
             mp.Process(target=self.calculate_rank, kwargs={'in_queue': eval_result_queue,

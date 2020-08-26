@@ -3,6 +3,7 @@ import timeit
 import numpy as np
 import tensorflow as tf
 import multiprocessing as mp
+import random
 from dataset import KnowledgeGraph
 
 
@@ -169,7 +170,7 @@ class TransE:
             mp.Process(target=self.calculate_rank, kwargs={'in_queue': eval_result_queue,
                                                            'out_queue': rank_result_queue}).start()
         n_used_eval_triple = 0
-        for eval_triple in self.kg.test_triples:
+        for eval_triple in random.sample(self.kg.test_triples, 100):
             idx_head_prediction, idx_tail_prediction = session.run(fetches=[self.idx_head_prediction,
                                                                             self.idx_tail_prediction],
                                                                    feed_dict={self.eval_triple: eval_triple})
